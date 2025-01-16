@@ -1,0 +1,63 @@
+{
+  "name": "aidex",
+  "version": "0.0.1",
+  "description": "Get quick insights for all major AI models like GPT, Claude, Gemini, and more! 🧠",
+  "repository": "regenrek/aidex",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "bin": {
+    "aidex": "./dist/index.mjs"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "unbuild",
+    "dev": "vitest",
+    "lint": "eslint --cache . && prettier -c src test",
+    "start": "tsx src/cli.ts",
+    "lint:fix": "eslint --cache . --fix && prettier -c src test -w",
+    "release": "npm test && npm run build && npm publish",
+    "test": "npm run lint && npm run test:types && vitest run --coverage",
+    "test:types": "tsc --noEmit --skipLibCheck",
+    "prepack": "unbuild"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.18.0",
+    "eslint-config-unjs": "^0.4.2",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "unbuild": "3.2.0",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@9.14.4",
+  "dependencies": {
+    "colorette": "^2.0.20",
+    "consola": "^3.3.3",
+    "minisearch": "^7.1.1",
+    "mri": "^1.2.0",
+    "node-fetch-native": "^1.6.4",
+    "pathe": "^2.0.1",
+    "picocolors": "^1.1.1"
+  }
+}
