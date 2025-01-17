@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import consola from "consola";
 import mri from "mri";
 
 // Define proper types for subCommands and their return values
@@ -21,7 +20,7 @@ async function main() {
   }
 
   if (!(subCommand in subCommands)) {
-    consola.error(`Unknown command ${subCommand}`);
+    console.error(`Unknown command ${subCommand}`);
     process.exit(1);
   }
 
@@ -33,4 +32,4 @@ async function main() {
     });
 }
 
-main().catch(consola.error);
+main().catch(console.error);

@@ -20,7 +20,7 @@
     }
   },
   "bin": {
-    "aidex": "./dist/index.mjs"
+    "aidex": "./dist/cli.mjs"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -53,7 +53,6 @@
   "packageManager": "pnpm@9.14.4",
   "dependencies": {
     "colorette": "^2.0.20",
-    "consola": "^3.3.3",
     "minisearch": "^7.1.1",
     "mri": "^1.2.0",
     "node-fetch-native": "^1.6.4",
