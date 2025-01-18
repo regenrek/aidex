@@ -24,6 +24,8 @@ npx aidex --compare gemini,gpt-4o,claude-3-5-sonnet
 
 ## Usage
 
+
+```
 Usage: aidex [options] [search terms]
 
 Options:
@@ -40,6 +42,7 @@ Options:
   --show-all           Show all versions of models (including older ones)
   -c, --compare <models>  Compare multiple models (comma-separated)
   --verbose [level]    Show debug output (default level: 1, max: 2)
+```
 
 ## Grouping Models
 
