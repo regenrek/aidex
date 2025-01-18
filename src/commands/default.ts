@@ -31,6 +31,11 @@ interface OrderedSeries {
   [provider: string]: string[];
 }
 
+interface SortConfig {
+  field: string;
+  higherIsBetter: boolean;
+}
+
 function getSeriesOrder(): OrderedSeries {
   const rules = loadModelRules();
   const order: OrderedSeries = {};
@@ -171,6 +176,22 @@ function filterLegacyModels(
   });
 }
 
+function getSortConfig(sortBy: string): SortConfig {
+  switch (sortBy) {
+    case "input_cost_per_token":
+    case "output_cost_per_token": {
+      return { field: sortBy, higherIsBetter: false };
+    }
+    case "max_input_tokens":
+    case "max_output_tokens": {
+      return { field: sortBy, higherIsBetter: true };
+    }
+    default: {
+      return { field: sortBy, higherIsBetter: true };
+    }
+  }
+}
+
 function searchModels(
   miniSearch: MiniSearch,
   modelDb: Record<string, any>,
@@ -247,11 +268,11 @@ function searchModels(
 
   // Apply sorting
   if (options.sortBy) {
-    const sortField = options.sortBy;
+    const sortConfig = getSortConfig(options.sortBy);
     results.sort((a, b) => {
-      const aValue = a[sortField] || 0;
-      const bValue = b[sortField] || 0;
-      return bValue - aValue; // Descending order
+      const aValue = a[sortConfig.field] ?? 0;
+      const bValue = b[sortConfig.field] ?? 0;
+      return sortConfig.higherIsBetter ? bValue - aValue : aValue - bValue;
     });
   }
 
@@ -271,13 +292,14 @@ function groupModels(models: ModelInfo[]): ModelInfo[] {
   const modelGroups = new Map<string, ModelInfo[]>();
   const modelsWithoutDates: ModelInfo[] = [];
 
+  // Preserve input order by using the original array order
   for (const model of models) {
     // First check if model has a date pattern
     const dateMatch = model.name.match(
       /[-_](\d{4}-\d{2}-\d{2}|\d{8})(?:$|[-_])/
     );
 
-    // If no date pattern, keep the model
+    // If no date pattern, keep the model in original order
     if (!dateMatch) {
       modelsWithoutDates.push(model);
       continue;
@@ -296,7 +318,7 @@ function groupModels(models: ModelInfo[]): ModelInfo[] {
     modelGroups.get(baseName)!.push(model);
   }
 
-  // For each group, keep only the latest version
+  // For each group, keep only the latest version while preserving relative order
   const latestVersions = [...modelGroups.values()].flatMap((group) => {
     if (group.length === 1) return group;
 
@@ -318,17 +340,58 @@ function groupModels(models: ModelInfo[]): ModelInfo[] {
       return normalizedB.localeCompare(normalizedA);
     });
 
-    return group[0]; // Return only the latest version
+    return [group[0]]; // Return only the latest version
   });
 
-  // Combine models without dates and latest versions
-  return [...modelsWithoutDates, ...latestVersions];
+  // Combine models without dates and latest versions in original relative order
+  const result: ModelInfo[] = [];
+  const seenModels = new Set<string>();
+
+  // Add models in original order if they're either in modelsWithoutDates or latestVersions
+  for (const model of models) {
+    if (
+      !seenModels.has(model.name) &&
+      (modelsWithoutDates.some((m) => m.name === model.name) ||
+        latestVersions.some((m) => m.name === model.name))
+    ) {
+      result.push(model);
+      seenModels.add(model.name);
+    }
+  }
+
+  return result;
 }
 
 function compareModels(models: ModelInfo[], args: ParsedArgs): string {
   let processedModels = [...models];
   let output = "";
   let hiddenCount = 0;
+
+  // Debug sorting
+  if (args.verbose > 0 && args.sortBy) {
+    console.log("\nDebug: Sorting values before sort:");
+    for (const model of processedModels) {
+      console.log(`${model.name}: ${args.sortBy}=${model[args.sortBy!]}`);
+    }
+  }
+
+  // Apply sorting before any other processing
+  if (args.sortBy) {
+    const sortConfig = getSortConfig(args.sortBy);
+    processedModels.sort((a, b) => {
+      const aValue = a[sortConfig.field] ?? 0;
+      const bValue = b[sortConfig.field] ?? 0;
+      return sortConfig.higherIsBetter ? bValue - aValue : aValue - bValue;
+    });
+  }
+
+  // Debug sorting
+  if (args.verbose > 0 && args.sortBy) {
+    console.log("\nDebug: Sorting values after sort:");
+    for (const model of processedModels) {
+      console.log(`${model.name}: ${args.sortBy}=${model[args.sortBy!]}`);
+    }
+  }
 
   // Filter out legacy models early if --show-all is not set
   if (!args.showAll) {
@@ -433,8 +496,9 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
     // No grouping, but still handle showAll flag
     if (!args.showAll) {
       const beforeCount = processedModels.length;
-      processedModels = groupModels(processedModels);
-      hiddenCount = beforeCount - processedModels.length;
+      const groupedModels = groupModels(processedModels);
+      hiddenCount += beforeCount - groupedModels.length;
+      processedModels = groupedModels;
     }
     output = generateTable(processedModels);
   }
@@ -456,21 +520,14 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
 
 // Move the table generation logic to a separate function
 function generateTable(models: ModelInfo[]): string {
-  // Sort models by input tokens (desc) and then by input cost (asc)
-  models.sort((a, b) => {
-    const aTokens = a.max_input_tokens || 0;
-    const bTokens = b.max_input_tokens || 0;
-    if (aTokens !== bTokens) return bTokens - aTokens;
-
-    const aCost = a.input_cost_per_token || 0;
-    const bCost = b.input_cost_per_token || 0;
-    return aCost - bCost;
-  });
+  // Create a copy of the models array to preserve the original order
+  const orderedModels = [...models];
 
   const columnWidths = ["Model", ...COMPARISON_FIELDS.map((f) => f.label)].map(
     (header, colIndex) => {
       let maxWidth = header.length;
-      for (const model of models) {
+      // Use orderedModels to calculate widths
+      for (const model of orderedModels) {
         const content =
           colIndex === 0
             ? model.name
@@ -487,15 +544,16 @@ function generateTable(models: ModelInfo[]): string {
   const headers = ["Model", ...COMPARISON_FIELDS.map((f) => f.label)];
   const rows: string[][] = [];
 
-  for (const model of models) {
+  // Use orderedModels to generate rows in the same order
+  for (const model of orderedModels) {
     const row = [model.name];
 
     for (const field of COMPARISON_FIELDS) {
       const value = model[field.field];
       const formattedValue = field.format?.(value) || value;
 
-      if (typeof value === "number" && models.length > 1) {
-        const values = models
+      if (typeof value === "number" && orderedModels.length > 1) {
+        const values = orderedModels
           .map((m) => m[field.field])
           .filter((v) => typeof v === "number");
         const bestValue = field.higher_is_better

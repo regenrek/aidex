@@ -61,45 +61,97 @@ describe("Integration: CLI Commands", () => {
     expect(result.stdout).not.toContain("embedding");
   });
 
-  it("sorts models by token count", () => {
+  it("sorts models by token count by default", () => {
+    const result = spawnSync("node", [cliPath], {
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+
+    expect(result.stderr).toBe("");
+    const lines = result.stdout.split("\n");
+    const tokenValues = extractTokenValues(lines);
+    expect(tokenValues).toEqual([...tokenValues].sort((a, b) => b - a));
+  });
+
+  it("sorts models by token count with --sort-token flag", () => {
     const result = spawnSync("node", [cliPath, "--sort-token"], {
       encoding: "utf8",
       stdio: "pipe",
     });
 
     expect(result.stderr).toBe("");
-    // Extract max tokens column and verify descending order
     const lines = result.stdout.split("\n");
-    const tokenValues = lines
-      .slice(1) // Skip header
-      .map((line) => {
-        const match = line.match(/\|\s*(\d+,?\d*)\s*\|/);
-        return match ? Number.parseInt(match[1].replace(/,/g, "")) : 0;
-      })
-      .filter((val) => val > 0);
-
+    const tokenValues = extractTokenValues(lines);
     expect(tokenValues).toEqual([...tokenValues].sort((a, b) => b - a));
   });
 
-  it("sorts models by cost", () => {
+  it("sorts models by cost with --sort-cost flag", () => {
     const result = spawnSync("node", [cliPath, "--sort-cost"], {
       encoding: "utf8",
       stdio: "pipe",
     });
 
     expect(result.stderr).toBe("");
-    // Extract cost column and verify descending order
     const lines = result.stdout.split("\n");
-    const costValues = lines
-      .slice(1) // Skip header
-      .map((line) => {
-        const match = line.match(/\|\s*(\d+\.\d+e[-+]?\d+)\s*\|/);
-        return match ? Number.parseFloat(match[1]) : 0;
-      })
-      .filter((val) => val > 0);
-
+    const costValues = extractCostValues(lines);
     expect(costValues).toEqual([...costValues].sort((a, b) => b - a));
   });
+
+  // Helper functions for extracting values
+  function extractTokenValues(lines: string[]): number[] {
+    const tokenColumnIndex = lines[0]
+      .split("|")
+      .findIndex((col) => col.trim() === "In Tok");
+
+    if (tokenColumnIndex === -1) return [];
+
+    return lines
+      .slice(1) // Skip header
+      .filter((line) => line.includes("|")) // Only process table rows
+      .map((line) => {
+        const columns = line.split("|");
+        if (!columns[tokenColumnIndex]) return 0;
+
+        const value = columns[tokenColumnIndex]
+          .trim()
+          .replace(/[kM]/g, "") // Remove k and M suffixes
+          .replace(/,/g, ""); // Remove commas
+
+        // Convert k to thousands
+        if (line.includes("k")) {
+          return Number.parseFloat(value) * 1000;
+        }
+        // Convert M to millions
+        if (line.includes("M")) {
+          return Number.parseFloat(value) * 1_000_000;
+        }
+        return Number.parseFloat(value) || 0;
+      })
+      .filter((val) => val > 0);
+  }
+
+  function extractCostValues(lines: string[]): number[] {
+    const costColumnIndex = lines[0]
+      .split("|")
+      .findIndex((col) => col.trim() === "$/1M In");
+
+    if (costColumnIndex === -1) return [];
+
+    return lines
+      .slice(1) // Skip header
+      .filter((line) => line.includes("|")) // Only process table rows
+      .map((line) => {
+        const columns = line.split("|");
+        if (!columns[costColumnIndex]) return 0;
+
+        const value = columns[costColumnIndex]
+          .trim()
+          .replace("$", "") // Remove dollar sign
+          .trim();
+        return Number.parseFloat(value) || 0;
+      })
+      .filter((val) => val > 0);
+  }
 
   it("combines multiple filters", () => {
     const result = spawnSync(
@@ -301,5 +353,87 @@ describe("Integration: CLI Commands", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("latest Models:");
     expect(result.stdout).toContain("audio Models:");
+  });
+
+  it("correctly sorts models by cost in ascending order", () => {
+    const result = spawnSync(
+      "node",
+      [
+        cliPath,
+        "--compare",
+        "deepseek/deepseek-chat,claude-3-haiku,claude-3-opus",
+        "--sort-by",
+        "input_cost_per_token",
+      ],
+      {
+        encoding: "utf8",
+        stdio: "pipe",
+      }
+    );
+
+    expect(result.stderr).toBe("");
+
+    // Get the table content
+    const tableLines = result.stdout
+      .split("\n")
+      .filter((line) => line.includes("│"))
+      .filter((line) => !line.includes("─"));
+
+    // Extract model names in order they appear in table
+    const modelOrder = tableLines
+      .slice(1) // Skip header
+      .map((line) => line.split("│")[1].trim());
+
+    // Verify order matches expected (deepseek should be first as it has lowest cost)
+    expect(modelOrder[0]).toContain("deepseek");
+    expect(modelOrder.at(-1)).toContain("opus");
+  });
+
+  it("preserves sort order when displaying grouped results", () => {
+    const result = spawnSync(
+      "node",
+      [
+        cliPath,
+        "--provider",
+        "anthropic,deepseek",
+        "--sort-by",
+        "input_cost_per_token",
+        "--group-by",
+        "provider",
+      ],
+      {
+        encoding: "utf8",
+        stdio: "pipe",
+      }
+    );
+
+    expect(result.stderr).toBe("");
+
+    // Within each provider group, models should be sorted by cost
+    const lines = result.stdout.split("\n");
+    const deepseekSection = lines
+      .slice(lines.findIndex((l) => l.includes("deepseek Models:")) + 1)
+      .filter((line) => line.includes("│"))
+      .filter((line) => !line.includes("─"));
+
+    const anthropicSection = lines
+      .slice(lines.findIndex((l) => l.includes("anthropic Models:")) + 1)
+      .filter((line) => line.includes("│"))
+      .filter((line) => !line.includes("─"));
+
+    // Helper to extract cost from a table row
+    const getCostFromLine = (line: string): number => {
+      const match = line.match(/\$(\d+\.?\d*)/);
+      return match ? Number.parseFloat(match[1]) : Infinity;
+    };
+
+    // Verify costs are in ascending order within each section
+    // eslint-disable-next-line unicorn/no-array-callback-reference
+    const deepseekCosts = deepseekSection.slice(1).map(getCostFromLine);
+    // eslint-disable-next-line unicorn/no-array-callback-reference
+    const anthropicCosts = anthropicSection.slice(1).map(getCostFromLine);
+
+    expect(deepseekCosts).toEqual([...deepseekCosts].sort((a, b) => a - b));
+    expect(anthropicCosts).toEqual([...anthropicCosts].sort((a, b) => a - b));
   });
 });

@@ -28,7 +28,14 @@ export function parseArgs(args: string[]): ParsedArgs {
       s: "sort-by",
       g: "group-by",
     },
-    boolean: ["help", "function-calling", "vision", "show-all"],
+    boolean: [
+      "help",
+      "function-calling",
+      "vision",
+      "show-all",
+      "sort-token",
+      "sort-cost",
+    ],
     string: ["compare", "provider", "mode", "sort-by", "group-by"],
     default: {
       help: false,
@@ -51,13 +58,30 @@ export function parseArgs(args: string[]): ParsedArgs {
     _: parsed._,
   };
 
-  // Handle special sort cases
+  // Handle special sort cases first and normalize sort field names
   if (parsed["sort-token"]) {
     result.sortBy = "max_input_tokens";
   } else if (parsed["sort-cost"]) {
     result.sortBy = "input_cost_per_token";
+  } else if (parsed["sort-by"]) {
+    // Normalize sort field names
+    const sortField = parsed["sort-by"].toLowerCase();
+    switch (sortField) {
+      case "max_input_tokens": {
+        result.sortBy = "max_input_tokens";
+        break;
+      }
+      case "input_cost_per_token": {
+        result.sortBy = "input_cost_per_token";
+        break;
+      }
+      default: {
+        result.sortBy = sortField;
+      }
+    }
   } else {
-    result.sortBy = parsed["sort-by"];
+    // Default sorting by max_input_tokens if no sort option specified
+    result.sortBy = "max_input_tokens";
   }
 
   // Handle models
