@@ -68,9 +68,9 @@ export function parseArgs(args: string[]): ParsedArgs {
   }
 
   // Handle group-by validation and default
-  if (parsed["group-by"]) {
+  if (parsed["group-by"] !== undefined) {
     const validGroupBy = ["type", "provider", "mode", "series"];
-    const groupByValue = parsed["group-by"];
+    const groupByValue = parsed["group-by"] || "series";
 
     if (!validGroupBy.includes(groupByValue)) {
       console.error(
