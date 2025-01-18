@@ -13,108 +13,81 @@ export interface ParsedArgs {
   groupBy?: string;
   showAll: boolean;
   verbose: number;
+  _: string[];
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
-  const parsed: ParsedArgs = {
+  const parsed = mri(args, {
+    alias: {
+      h: "help",
+      c: "compare",
+      p: "provider",
+      f: "function-calling",
+      v: "vision",
+      m: "model",
+      s: "sort-by",
+      g: "group-by",
+    },
+    boolean: ["help", "function-calling", "vision", "show-all"],
+    string: ["compare", "provider", "mode", "sort-by", "group-by"],
+    default: {
+      help: false,
+      models: [],
+      showAll: false,
+      verbose: 0,
+    },
+  });
+
+  const result: ParsedArgs = {
+    help: parsed.help,
     models: [],
-    help: false,
-    showAll: false,
-    verbose: 0,
+    showAll: parsed["show-all"],
+    verbose: parsed.verbose || 0,
+    compare: parsed.compare,
+    provider: parsed.provider,
+    functionCalling: parsed["function-calling"],
+    vision: parsed.vision,
+    mode: parsed.mode,
+    _: parsed._,
   };
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    switch (arg) {
-      case "-h":
-      case "--help": {
-        parsed.help = true;
-        break;
-      }
-      case "-c":
-      case "--compare": {
-        parsed.compare = args[++i];
-        break;
-      }
-      case "-p":
-      case "--provider": {
-        parsed.provider = args[++i];
-        break;
-      }
-      case "-f":
-      case "--function-calling": {
-        parsed.functionCalling = true;
-        break;
-      }
-      case "-v":
-      case "--vision": {
-        parsed.vision = true;
-        break;
-      }
-      case "-m":
-      case "--model": {
-        if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
-          parsed.models.push(args[++i]);
-        }
-        break;
-      }
-      case "-s":
-      case "--sort-by": {
-        parsed.sortBy = args[++i];
-        break;
-      }
-      case "--sort-token": {
-        parsed.sortBy = "max_input_tokens";
-        break;
-      }
-      case "--sort-cost": {
-        parsed.sortBy = "input_cost_per_token";
-        break;
-      }
-      case "-g":
-      case "--group-by": {
-        if (
-          parsed.models.length === 0 &&
-          !args.includes("--model") &&
-          !args.includes("-m")
-        ) {
-          console.error("--group-by can only be used with --model flag");
-          process.exit(1);
-        }
-        // Make "series" the default if no value is provided
-        parsed.groupBy =
-          i + 1 < args.length && !args[i + 1].startsWith("-")
-            ? args[++i]
-            : "series";
-        break;
-      }
-      case "--show-all": {
-        parsed.showAll = true;
-        break;
-      }
-      case "--verbose": {
-        parsed.verbose++;
-        break;
-      }
-      case "--mode": {
-        parsed.mode = args[++i];
-        break;
-      }
-      default: {
-        if (arg.startsWith("-")) {
-          console.error(`Unknown option: ${arg}`);
-          process.exit(1);
-        }
-        if (parsed.command) {
-          parsed.models.push(arg);
-        } else {
-          parsed.command = arg;
-        }
-      }
-    }
+  // Handle special sort cases
+  if (parsed["sort-token"]) {
+    result.sortBy = "max_input_tokens";
+  } else if (parsed["sort-cost"]) {
+    result.sortBy = "input_cost_per_token";
+  } else {
+    result.sortBy = parsed["sort-by"];
   }
 
-  return parsed;
+  // Handle models
+  if (Array.isArray(parsed.model)) {
+    result.models = parsed.model;
+  } else if (parsed.model) {
+    result.models = [parsed.model];
+  }
+
+  // Handle group-by validation and default
+  if (parsed["group-by"]) {
+    const validGroupBy = ["type", "provider", "mode", "series"];
+    const groupByValue = parsed["group-by"];
+
+    if (!validGroupBy.includes(groupByValue)) {
+      console.error(
+        `Invalid --group-by value. Must be one of: ${validGroupBy.join(", ")}`
+      );
+      process.exit(1);
+    }
+    result.groupBy = groupByValue;
+  }
+
+  // Handle command and additional models from positional args
+  if (parsed._.length > 0) {
+    result.command = parsed._[0];
+    result.models.push(...parsed._.slice(1));
+  }
+
+  return result;
 }
 
 export function printHelp(): void {

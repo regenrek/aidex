@@ -11,9 +11,9 @@ List all GPT models and group by series
 npx aidex -m gpt -g
 ```
 
-List all OpenAI models
+List all OpenAI models and group by type
 ```
-npx aidex --provider openai
+npx aidex -p openai --group-by type
 ```
 
 Compare models
@@ -36,7 +36,7 @@ Options:
   --sort-token          Sort by max input tokens (descending)
   --sort-cost           Sort by input cost per token (descending)
   --sort-by <field>     Sort by specific field (max_tokens, max_input_tokens, etc)
-  --group-by <criteria> Group results by: type, provider, mode, or series
+  --group-by <criteria> Group results by: type, provider, mode, or series (requires --model or --provider)
   --show-all           Show all versions of models (including older ones)
   -c, --compare <models>  Compare multiple models (comma-separated)
   --verbose [level]    Show debug output (default level: 1, max: 2)

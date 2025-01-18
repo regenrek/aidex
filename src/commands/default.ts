@@ -330,12 +330,6 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
   let output = "";
   let hiddenCount = 0;
 
-  // Validate --group-by usage
-  if (args.groupBy && (!args.models || args.models.length === 0)) {
-    console.error("--group-by can only be used with --model flag");
-    process.exit(1);
-  }
-
   // Filter out legacy models early if --show-all is not set
   if (!args.showAll) {
     const beforeCount = processedModels.length;
@@ -535,9 +529,11 @@ function generateTable(models: ModelInfo[]): string {
 export default async function defaultMain(): Promise<void> {
   const args: ParsedArgs = parseArgs(process.argv.slice(2));
 
-  // Add validation for --group-by usage
-  if (args.groupBy && (!args.models || args.models.length === 0)) {
-    console.error("--group-by can only be used with --model flag");
+  // Update validation for --group-by usage
+  if (args.groupBy && !args.models?.length && !args.provider) {
+    console.error(
+      "--group-by can only be used with --model or --provider flag"
+    );
     process.exit(1);
   }
 

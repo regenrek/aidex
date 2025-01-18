@@ -180,7 +180,7 @@ describe("Integration: CLI Commands", () => {
     });
 
     expect(result.stderr).toContain(
-      "--group-by can only be used with --model flag"
+      "--group-by can only be used with --model or --provider flag"
     );
     expect(result.status).toBe(1);
   });
@@ -286,5 +286,20 @@ describe("Integration: CLI Commands", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("o1 Models:");
     expect(result.stdout).toContain("o1-mini Models:");
+  });
+
+  it("groups models by type with --provider flag", () => {
+    const result = spawnSync(
+      "node",
+      [cliPath, "--provider", "openai", "--group-by", "type"],
+      {
+        encoding: "utf8",
+        stdio: "pipe",
+      }
+    );
+
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("latest Models:");
+    expect(result.stdout).toContain("audio Models:");
   });
 });
