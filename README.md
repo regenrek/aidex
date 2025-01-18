@@ -1,6 +1,6 @@
 # aidex
 
-![llmdex Cover](/public/cover.jpeg)
+![llmdex Cover](/public/cover.png)
 
 A CLI tool that provides detailed information about AI language models, helping developers choose the right model for their needs.
 
@@ -9,10 +9,9 @@ A CLI tool that provides detailed information about AI language models, helping 
 Usage: aidex [options] [search terms]
 
 Options:
-  --help                  Show this help message
-  -h                     Alias for --help
+  --help, -h             Show this help message
   -m, --model <name>     Search for specific model(s)
-  --provider <name>      Filter by provider
+  -p, --provider <name>  Filter by provider
   --function-calling     Show only models that support function calling
   --vision              Show only models that support vision
   --assistant-prefill   Show only models that support assistant prefill
@@ -20,6 +19,8 @@ Options:
   --sort-token          Sort by max input tokens (descending)
   --sort-cost           Sort by input cost per token (descending)
   --sort-by <field>     Sort by specific field (max_tokens, max_input_tokens, etc)
+  --group-by <criteria> Group results by: type, provider, or mode
+  --show-all           Show all versions of models (including older ones)
   -c, --compare <models> Compare multiple models (comma-separated)
   --verbose [level]     Show debug output (default level: 1, max: 2)
 
@@ -29,6 +30,8 @@ Examples:
   npx aidex --function-calling --vision
   npx aidex --mode chat --sort-cost
   npx aidex --compare "gpt-4,claude-2"
+  npx aidex --group-by provider
+  npx aidex --show-all --group-by type
 
 ## Links
 
