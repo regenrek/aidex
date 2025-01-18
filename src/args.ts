@@ -1,119 +1,139 @@
 import mri from "mri";
 
 export interface ParsedArgs {
-  help: boolean;
-  models: string[];
-  provider?: string;
   command?: string;
+  models: string[];
+  help: boolean;
+  compare?: string;
+  provider?: string;
   functionCalling?: boolean;
   vision?: boolean;
-  assistantPrefill?: boolean;
   mode?: string;
   sortBy?: string;
-  compare?: string;
-  verbose: number;
+  groupBy?: string;
   showAll: boolean;
-  groupBy?: "type" | "provider" | "mode";
+  verbose: number;
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
-  const argv = mri(args, {
-    alias: {
-      h: "help",
-      p: "provider",
-      m: "model",
-      c: "compare",
-    },
-    boolean: [
-      "help",
-      "function-calling",
-      "vision",
-      "assistant-prefill",
-      "show-all",
-    ],
-    string: ["provider", "mode", "sort-by", "model", "compare", "group-by"],
-    default: {
-      help: false,
-      showAll: false,
-    },
-  });
-
-  const result: ParsedArgs = {
-    help: argv.help,
+  const parsed: ParsedArgs = {
     models: [],
-    provider: argv.provider,
-    command: argv._.length > 0 ? argv._[0].toString() : undefined,
-    functionCalling: argv["function-calling"],
-    vision: argv.vision,
-    assistantPrefill: argv["assistant-prefill"],
-    mode: argv.mode,
-    sortBy: argv["sort-by"],
-    compare: argv.compare,
+    help: false,
+    showAll: false,
     verbose: 0,
-    showAll: argv["show-all"],
-    groupBy: argv["group-by"] as ParsedArgs["groupBy"],
   };
-
-  // Handle sort shortcuts
-  if (argv["sort-token"]) {
-    result.sortBy = "max_input_tokens";
-  } else if (argv["sort-cost"]) {
-    result.sortBy = "input_cost_per_token";
-  }
-
-  // Handle --model flag
-  if (argv.model) {
-    const modelArgs = Array.isArray(argv.model) ? argv.model : [argv.model];
-    result.models.push(...modelArgs);
-  }
-
-  // Handle non-flag arguments as model names
-  for (const arg of argv._) {
-    const argStr = arg.toString();
-    if (!result.command) {
-      result.command = argStr;
-    }
-    result.models.push(argStr);
-  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
-      case "--verbose": {
-        const level = Number.parseInt(args[i + 1]);
-        result.verbose = Number.isNaN(level) ? 1 : level;
-        i++;
+      case "-h":
+      case "--help": {
+        parsed.help = true;
         break;
+      }
+      case "-c":
+      case "--compare": {
+        parsed.compare = args[++i];
+        break;
+      }
+      case "-p":
+      case "--provider": {
+        parsed.provider = args[++i];
+        break;
+      }
+      case "-f":
+      case "--function-calling": {
+        parsed.functionCalling = true;
+        break;
+      }
+      case "-v":
+      case "--vision": {
+        parsed.vision = true;
+        break;
+      }
+      case "-m":
+      case "--model": {
+        if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+          parsed.models.push(args[++i]);
+        }
+        break;
+      }
+      case "-s":
+      case "--sort-by": {
+        parsed.sortBy = args[++i];
+        break;
+      }
+      case "--sort-token": {
+        parsed.sortBy = "max_input_tokens";
+        break;
+      }
+      case "--sort-cost": {
+        parsed.sortBy = "input_cost_per_token";
+        break;
+      }
+      case "-g":
+      case "--group-by": {
+        if (
+          parsed.models.length === 0 &&
+          !args.includes("--model") &&
+          !args.includes("-m")
+        ) {
+          console.error("--group-by can only be used with --model flag");
+          process.exit(1);
+        }
+        // Make "series" the default if no value is provided
+        parsed.groupBy =
+          i + 1 < args.length && !args[i + 1].startsWith("-")
+            ? args[++i]
+            : "series";
+        break;
+      }
+      case "--show-all": {
+        parsed.showAll = true;
+        break;
+      }
+      case "--verbose": {
+        parsed.verbose++;
+        break;
+      }
+      case "--mode": {
+        parsed.mode = args[++i];
+        break;
+      }
+      default: {
+        if (arg.startsWith("-")) {
+          console.error(`Unknown option: ${arg}`);
+          process.exit(1);
+        }
+        if (parsed.command) {
+          parsed.models.push(arg);
+        } else {
+          parsed.command = arg;
+        }
       }
     }
   }
 
-  return result;
+  return parsed;
 }
 
 export function printHelp(): void {
   console.log(`
-Usage: llm-compare [options] [model-name]
+Usage: aidex [options] [search terms]
 
 Options:
-  --help                  Show this help message
+  --help, -h                  Show this help message
   -m, --model <name>     Search for specific model(s)
-  --provider <name>      Filter by provider
+  -p, --provider <name>  Filter by provider
   --function-calling     Show only models that support function calling
   --vision              Show only models that support vision
-  --assistant-prefill   Show only models that support assistant prefill
   --mode <type>         Filter by mode (embedding, chat, completion, rerank, etc)
   --sort-token          Sort by max input tokens (descending)
   --sort-cost           Sort by input cost per token (descending)
   --sort-by <field>     Sort by specific field (max_tokens, max_input_tokens, etc)
-  --group-by <criteria> Group results by: type, provider, or mode
+  --group-by <criteria> Group results by: type, provider, mode, or series
   --show-all           Show all versions of models (including older ones)
   -c, --compare <models>  Compare multiple models (comma-separated)
   --verbose [level]    Show debug output (default level: 1, max: 2)
-
-Examples:
-  llm-compare gpt-4 --verbose 2     Show detailed debug info while searching for gpt-4
-  llm-compare --group-by provider   Group models by their providers
-  llm-compare --compare "gpt-4,claude-2" --verbose 2   Show debug info during comparison
 `);
 }

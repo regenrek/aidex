@@ -11,9 +11,9 @@ importers:
       colorette:
         specifier: ^2.0.20
         version: 2.0.20
-      consola:
-        specifier: ^3.3.3
-        version: 3.4.0
+      confbox:
+        specifier: ^0.1.8
+        version: 0.1.8
       minisearch:
         specifier: ^7.1.1
         version: 7.1.1

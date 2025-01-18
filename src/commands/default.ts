@@ -4,6 +4,7 @@ import { parseArgs, printHelp, type ParsedArgs } from "../args";
 import MiniSearch from "minisearch";
 import tableize from "../table";
 import pc from "picocolors";
+import { getModelSeries, loadModelRules } from "../model-db";
 
 interface ModelInfo {
   name: string;
@@ -15,7 +16,6 @@ interface SearchOptions {
   provider?: string;
   functionCalling?: boolean;
   vision?: boolean;
-  assistantPrefill?: boolean;
   mode?: string;
   sortBy?: string;
 }
@@ -25,6 +25,21 @@ interface ComparisonField {
   label: string;
   higher_is_better: boolean;
   format?: (value: any) => string;
+}
+
+interface OrderedSeries {
+  [provider: string]: string[];
+}
+
+function getSeriesOrder(): OrderedSeries {
+  const rules = loadModelRules();
+  const order: OrderedSeries = {};
+
+  for (const [provider, config] of Object.entries(rules)) {
+    order[provider] = config.series.map((rule) => rule.name);
+  }
+
+  return order;
 }
 
 function formatTokens(tokens?: number): string {
@@ -99,15 +114,13 @@ const COMPARISON_FIELDS: ComparisonField[] = [
   },
 ];
 
-// Add debug logging helper
+let globalVerboseLevel = 0;
+
 function debug(level: number, ...args: any[]): void {
   if (globalVerboseLevel >= level) {
     console.log(...args);
   }
 }
-
-// Add global variable to store verbose level
-let globalVerboseLevel = 0;
 
 function initializeModelSearch(modelDb: Record<string, any>): MiniSearch {
   debug(2, "\nInitializing Search:");
@@ -118,12 +131,8 @@ function initializeModelSearch(modelDb: Record<string, any>): MiniSearch {
     storeFields: ["name", "provider", "mode"],
     idField: "name",
     processTerm: (term) => term.toLowerCase(),
-    tokenize: (string, _fieldName) => {
-      // Only tokenize by full model names or exact words
-      return string.split(/[\s,]+/);
-    },
+    tokenize: (string, _fieldName) => string.split(/[\s,]+/),
     searchOptions: {
-      // Removed fuzzy matching as default
       prefix: false,
       boost: {
         name: 3,
@@ -140,37 +149,47 @@ function initializeModelSearch(modelDb: Record<string, any>): MiniSearch {
   }));
 
   debug(2, "Documents prepared:", modelDocs.length);
-
   miniSearch.addAll(modelDocs);
   debug(2, "Search index built");
 
-  // Verify a few random models are indexed
   const sampleKeys = Object.keys(modelDb).slice(0, 3);
   debug(2, "Sample models indexed:", sampleKeys);
 
   return miniSearch;
 }
 
+function filterLegacyModels(
+  models: ModelInfo[],
+  showAll: boolean
+): ModelInfo[] {
+  if (showAll) return models;
+
+  return models.filter((model) => {
+    const provider = model.litellm_provider?.toLowerCase() || "unknown";
+    const series = getModelSeries(model.name, provider);
+    return series !== "legacy";
+  });
+}
+
 function searchModels(
   miniSearch: MiniSearch,
   modelDb: Record<string, any>,
   query: string,
-  options: SearchOptions = {}
+  options: SearchOptions = {},
+  args: ParsedArgs
 ): ModelInfo[] {
   debug(2, "\nSearch Debug:");
   debug(2, "Query:", query);
   debug(2, "Search options:", options);
 
   // First try exact match in modelDb
-  if (modelDb[query]) {
-    debug(2, "Found exact match in modelDb");
-    return [
-      {
-        name: query,
-        ...modelDb[query],
-      },
-    ];
-  }
+  // if (modelDb[query]) {
+  //   const model = {
+  //     name: query,
+  //     ...modelDb[query],
+  //   };
+  //   return filterLegacyModels([model], args.showAll);
+  // }
 
   // If no exact match, try prefix search
   const searchQuery = query.toLowerCase();
@@ -198,7 +217,10 @@ function searchModels(
       }));
   }
 
-  // Apply filters
+  // Filter out legacy models and apply other filters
+  results = filterLegacyModels(results, args.showAll);
+
+  // Apply other filters
   if (options.provider) {
     results = results.filter((model) =>
       model.litellm_provider
@@ -215,12 +237,6 @@ function searchModels(
 
   if (options.vision) {
     results = results.filter((model) => model.supports_vision === true);
-  }
-
-  if (options.assistantPrefill) {
-    results = results.filter(
-      (model) => model.supports_assistant_prefill === true
-    );
   }
 
   if (options.mode) {
@@ -311,9 +327,26 @@ function groupModels(models: ModelInfo[]): ModelInfo[] {
 
 function compareModels(models: ModelInfo[], args: ParsedArgs): string {
   let processedModels = [...models];
-  const originalCount = models.length;
   let output = "";
   let hiddenCount = 0;
+
+  // Validate --group-by usage
+  if (args.groupBy && (!args.models || args.models.length === 0)) {
+    console.error("--group-by can only be used with --model flag");
+    process.exit(1);
+  }
+
+  // Filter out legacy models early if --show-all is not set
+  if (!args.showAll) {
+    const beforeCount = processedModels.length;
+    const provider =
+      processedModels[0]?.litellm_provider?.toLowerCase() || "unknown";
+    processedModels = processedModels.filter((model) => {
+      const series = getModelSeries(model.name, provider);
+      return series !== "legacy";
+    });
+    hiddenCount = beforeCount - processedModels.length;
+  }
 
   if (args.groupBy) {
     let groups: Record<string, ModelInfo[]>;
@@ -335,27 +368,48 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
         break;
       }
       case "provider": {
-        groups = processedModels.reduce(
-          (acc, model) => {
-            const provider = model.litellm_provider || "unknown";
-            if (!acc[provider]) acc[provider] = [];
-            acc[provider].push(model);
-            return acc;
-          },
-          {} as Record<string, ModelInfo[]>
-        );
+        groups = {};
+        for (const model of processedModels) {
+          const provider = model.litellm_provider || "unknown";
+          if (!groups[provider]) groups[provider] = [];
+          groups[provider].push(model);
+        }
         break;
       }
       case "mode": {
-        groups = processedModels.reduce(
-          (acc, model) => {
-            const mode = model.mode || "unknown";
-            if (!acc[mode]) acc[mode] = [];
-            acc[mode].push(model);
-            return acc;
-          },
-          {} as Record<string, ModelInfo[]>
-        );
+        groups = {};
+        for (const model of processedModels) {
+          const mode = model.mode || "unknown";
+          if (!groups[mode]) groups[mode] = [];
+          groups[mode].push(model);
+        }
+        break;
+      }
+      case "series": {
+        const seriesOrder = getSeriesOrder();
+        groups = {};
+
+        const provider =
+          processedModels[0]?.litellm_provider?.toLowerCase() || "unknown";
+        const orderList = seriesOrder[provider] || [];
+
+        for (const series of orderList) {
+          groups[series] = [];
+        }
+        groups["other"] = [];
+
+        for (const model of processedModels) {
+          const provider = model.litellm_provider?.toLowerCase() || "unknown";
+          const series = getModelSeries(model.name, provider);
+
+          if (!groups[series]) groups[series] = [];
+          groups[series].push(model);
+        }
+
+        // Remove empty groups
+        for (const key of Object.keys(groups)) {
+          if (groups[key].length === 0) delete groups[key];
+        }
         break;
       }
       default: {
@@ -376,7 +430,7 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
     // Combine all groups with headers
     for (const [groupName, groupModels] of Object.entries(groups)) {
       if (groupModels.length > 0) {
-        output += `\n${pc.bold(groupName.toUpperCase())} Models:\n`;
+        output += `\n${pc.bold(groupName)} Models:\n`;
         output += generateTable(groupModels);
         output += "\n";
       }
@@ -442,7 +496,7 @@ function generateTable(models: ModelInfo[]): string {
   for (const model of models) {
     const row = [model.name];
 
-    for (const [fieldIdx, field] of COMPARISON_FIELDS.entries()) {
+    for (const field of COMPARISON_FIELDS) {
       const value = model[field.field];
       const formattedValue = field.format?.(value) || value;
 
@@ -481,6 +535,12 @@ function generateTable(models: ModelInfo[]): string {
 export default async function defaultMain(): Promise<void> {
   const args: ParsedArgs = parseArgs(process.argv.slice(2));
 
+  // Add validation for --group-by usage
+  if (args.groupBy && (!args.models || args.models.length === 0)) {
+    console.error("--group-by can only be used with --model flag");
+    process.exit(1);
+  }
+
   // Set global verbose level
   globalVerboseLevel = args.verbose;
 
@@ -499,7 +559,7 @@ export default async function defaultMain(): Promise<void> {
 
     // Use existing search function for each model query
     for (const query of modelQueries) {
-      const searchResults = searchModels(miniSearch, modelDb, query);
+      const searchResults = searchModels(miniSearch, modelDb, query, {}, args);
 
       if (searchResults.length === 0) {
         console.error(`No models found matching: ${query}`);
@@ -530,13 +590,18 @@ export default async function defaultMain(): Promise<void> {
     provider: args.provider,
     functionCalling: args.functionCalling,
     vision: args.vision,
-    assistantPrefill: args.assistantPrefill,
     mode: args.mode,
     sortBy: args.sortBy,
   };
 
   const searchQuery = args.command || args.models.join(" ") || "";
-  const results = searchModels(miniSearch, modelDb, searchQuery, searchOptions);
+  const results = searchModels(
+    miniSearch,
+    modelDb,
+    searchQuery,
+    searchOptions,
+    args
+  );
 
   if (results.length === 0) {
     console.error(`No models found matching the specified criteria`);
