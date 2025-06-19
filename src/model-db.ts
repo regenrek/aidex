@@ -111,7 +111,9 @@ export async function loadModelDb(): Promise<Record<string, any>> {
         limits: (model as any).limit ?? (model as any).limits ?? {},
       } as RawModel;
 
-      flattened[normalized.id] = flatten(normalized);
+      // Use a composite key to avoid collisions between providers that share the same model ID (e.g. "o3" for both OpenAI and Azure)
+      const compositeKey = `${providerId}/${normalized.id}`;
+      flattened[compositeKey] = flatten(normalized);
     }
   }
 

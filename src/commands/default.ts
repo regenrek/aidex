@@ -169,8 +169,8 @@ function initializeModelSearch(modelDb: Record<string, any>): MiniSearch {
 
   const miniSearch = new MiniSearch({
     fields: ["name", "provider", "mode", "content"],
-    storeFields: ["name", "provider", "mode"],
-    idField: "name",
+    storeFields: ["id", "name", "provider", "mode"],
+    idField: "id",
     processTerm: (term) => term.toLowerCase(),
     tokenize: (string, _fieldName) => string.split(/[\s,]+/),
     searchOptions: {
@@ -182,11 +182,12 @@ function initializeModelSearch(modelDb: Record<string, any>): MiniSearch {
     },
   });
 
-  const modelDocs = Object.entries(modelDb).map(([name, info]) => ({
-    name,
+  const modelDocs = Object.entries(modelDb).map(([key, info]) => ({
+    id: key,
+    name: info.name || key,
     provider: info.litellm_provider || "",
     mode: info.mode || "",
-    content: `${name} ${info.litellm_provider || ""} ${info.mode || ""}`,
+    content: `${info.name} ${info.litellm_provider || ""} ${info.mode || ""}`,
   }));
 
   debug(2, "Documents prepared:", modelDocs.length);
@@ -250,10 +251,18 @@ function searchModels(
 
   // If no exact match, try prefix search
   const searchQuery = query.toLowerCase();
+  const normalizedSearchQuery = searchQuery.replace(/[-_]/g, " ");
   let results = Object.entries(modelDb)
-    .filter(([name]) => name.toLowerCase().startsWith(searchQuery))
-    .map(([name, info]) => ({
-      name,
+    // Match against the canonical model name (info.name) to avoid issues when the DB key is a composite like "provider/id"
+    .filter(([_key, info]) => {
+      const name = (info as any).name?.toLowerCase() || "";
+      return (
+        name.startsWith(searchQuery) || name.startsWith(normalizedSearchQuery)
+      );
+    })
+    .map(([_, info]) => ({
+      // Prefer the canonical model name over the composite DB key
+      name: (info as any).name,
       ...info,
     }));
 
@@ -268,10 +277,13 @@ function searchModels(
           content: 1,
         },
       })
-      .map((result) => ({
-        name: result.name,
-        ...modelDb[result.name],
-      }));
+      .map((result) => {
+        const info = modelDb[(result as any).id] as any;
+        return {
+          name: info?.name || result.name,
+          ...info,
+        } as ModelInfo;
+      });
   }
 
   // Filter out legacy models and apply other filters
