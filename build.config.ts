@@ -10,13 +10,4 @@ export default defineBuildConfig({
     emitCJS: true,
     inlineDependencies: true,
   },
-  hooks: {
-    "build:done": (ctx) => {
-      // Copy modelrules.toml to dist directory
-      copyFileSync(
-        resolve(ctx.options.rootDir, "modelrules.toml"),
-        resolve(ctx.options.outDir, "modelrules.toml")
-      );
-    },
-  },
 });

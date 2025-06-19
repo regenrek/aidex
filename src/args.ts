@@ -14,6 +14,10 @@ export interface ParsedArgs {
   showAll: boolean;
   verbose: number;
   _: string[];
+  inputModalities?: string[];
+  outputModalities?: string[];
+  reasoning?: boolean;
+  toolCall?: boolean;
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
@@ -27,16 +31,29 @@ export function parseArgs(args: string[]): ParsedArgs {
       m: "model",
       s: "sort-by",
       g: "group-by",
+      i: "input",
+      o: "output",
+      t: "tool-call",
     },
     boolean: [
       "help",
       "function-calling",
       "vision",
+      "reasoning",
+      "tool-call",
       "show-all",
       "sort-token",
       "sort-cost",
     ],
-    string: ["compare", "provider", "mode", "sort-by", "group-by"],
+    string: [
+      "compare",
+      "provider",
+      "mode",
+      "sort-by",
+      "group-by",
+      "input",
+      "output",
+    ],
     default: {
       help: false,
       models: [],
@@ -80,8 +97,8 @@ export function parseArgs(args: string[]): ParsedArgs {
       }
     }
   } else {
-    // Default sorting by max_input_tokens if no sort option specified
-    result.sortBy = "max_input_tokens";
+    // No explicit sort flag provided – leave undefined so downstream logic can choose a sensible default
+    result.sortBy = undefined;
   }
 
   // Handle models
@@ -89,6 +106,25 @@ export function parseArgs(args: string[]): ParsedArgs {
     result.models = parsed.model;
   } else if (parsed.model) {
     result.models = [parsed.model];
+  }
+
+  if (parsed.input) {
+    result.inputModalities = Array.isArray(parsed.input)
+      ? parsed.input
+      : [parsed.input];
+  }
+  if (parsed.output) {
+    result.outputModalities = Array.isArray(parsed.output)
+      ? parsed.output
+      : [parsed.output];
+  }
+
+  result.reasoning = parsed.reasoning;
+  result.toolCall = parsed["tool-call"] || parsed["function-calling"];
+
+  // vision alias → image input modality
+  if (parsed.vision) {
+    result.inputModalities = [...(result.inputModalities || []), "image"];
   }
 
   // Handle group-by validation and default

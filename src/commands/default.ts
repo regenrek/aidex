@@ -4,7 +4,7 @@ import { parseArgs, printHelp, type ParsedArgs } from "../args";
 import MiniSearch from "minisearch";
 import tableize from "../table";
 import pc from "picocolors";
-import { getModelSeries, loadModelRules } from "../model-db";
+import { getModelSeries } from "../model-db";
 
 interface ModelInfo {
   name: string;
@@ -14,8 +14,12 @@ interface ModelInfo {
 
 interface SearchOptions {
   provider?: string;
-  functionCalling?: boolean;
-  vision?: boolean;
+  functionCalling?: boolean; // legacy
+  vision?: boolean; // legacy
+  reasoning?: boolean;
+  toolCall?: boolean;
+  inputModalities?: string[];
+  outputModalities?: string[];
   mode?: string;
   sortBy?: string;
 }
@@ -37,14 +41,11 @@ interface SortConfig {
 }
 
 function getSeriesOrder(): OrderedSeries {
-  const rules = loadModelRules();
-  const order: OrderedSeries = {};
-
-  for (const [provider, config] of Object.entries(rules)) {
-    order[provider] = config.series.map((rule) => rule.name);
-  }
-
-  return order;
+  // The previous implementation relied on a `rules` object that has been
+  // removed from the codebase. Returning an empty object keeps the
+  // existing call-sites working while deferring to `getModelSeries` for
+  // classification.
+  return {};
 }
 
 function formatTokens(tokens?: number): string {
@@ -68,6 +69,17 @@ function formatCost(cost?: number): string {
   return `$${perMillion.toFixed(3)}`;
 }
 
+function formatModalities(mods: string[] | undefined): string {
+  if (!mods?.length) return "—";
+  const map: Record<string, string> = {
+    text: "📝",
+    image: "📷",
+    audio: "🔊",
+    video: "🎥",
+  };
+  return mods.map((m) => map[m] ?? m[0]).join("");
+}
+
 const COMPARISON_FIELDS: ComparisonField[] = [
   {
     field: "litellm_provider",
@@ -76,14 +88,38 @@ const COMPARISON_FIELDS: ComparisonField[] = [
     format: (v) => v || "Unknown",
   },
   {
-    field: "mode",
-    label: "Mode",
+    field: "knowledge",
+    label: "Cutoff",
+    higher_is_better: true,
+    format: (v) => v || "—",
+  },
+  {
+    field: "input_modalities",
+    label: "In 📥",
     higher_is_better: false,
-    format: (v) => v || "Unknown",
+    format: formatModalities,
+  },
+  {
+    field: "output_modalities",
+    label: "Out 📤",
+    higher_is_better: false,
+    format: formatModalities,
+  },
+  {
+    field: "reasoning",
+    label: "Reason",
+    higher_is_better: true,
+    format: (v) => (v ? "✓" : "×"),
+  },
+  {
+    field: "tool_call",
+    label: "Tools",
+    higher_is_better: true,
+    format: (v) => (v ? "✓" : "×"),
   },
   {
     field: "max_input_tokens",
-    label: "In Tok",
+    label: "Ctx Tok",
     higher_is_better: true,
     format: formatTokens,
   },
@@ -106,16 +142,16 @@ const COMPARISON_FIELDS: ComparisonField[] = [
     format: formatCost,
   },
   {
-    field: "supports_vision",
-    label: "Vision",
-    higher_is_better: true,
-    format: (v) => (v ? "✓" : "×"),
+    field: "cache_read_cost_per_token",
+    label: "$/1M Cache R",
+    higher_is_better: false,
+    format: formatCost,
   },
   {
-    field: "supports_function_calling",
-    label: "Functions",
-    higher_is_better: true,
-    format: (v) => (v ? "✓" : "×"),
+    field: "cache_write_cost_per_token",
+    label: "$/1M Cache W",
+    higher_is_better: false,
+    format: formatCost,
   },
 ];
 
@@ -243,11 +279,15 @@ function searchModels(
 
   // Apply other filters
   if (options.provider) {
-    results = results.filter((model) =>
-      model.litellm_provider
-        ?.toLowerCase()
-        .includes(options.provider!.toLowerCase())
-    );
+    const providerList = options.provider
+      .split(",")
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean);
+
+    results = results.filter((model) => {
+      const provider = model.litellm_provider?.toLowerCase() || "";
+      return providerList.some((p) => provider.includes(p));
+    });
   }
 
   if (options.functionCalling) {
@@ -258,6 +298,25 @@ function searchModels(
 
   if (options.vision) {
     results = results.filter((model) => model.supports_vision === true);
+  }
+
+  if (options.reasoning) {
+    results = results.filter((m) => m.reasoning === true);
+  }
+  if (options.toolCall) {
+    results = results.filter((m) => m.tool_call === true);
+  }
+  if (options.inputModalities?.length) {
+    results = results.filter((m) =>
+      options.inputModalities!.every((mod) => m.input_modalities?.includes(mod))
+    );
+  }
+  if (options.outputModalities?.length) {
+    results = results.filter((m) =>
+      options.outputModalities!.every((mod) =>
+        m.output_modalities?.includes(mod)
+      )
+    );
   }
 
   if (options.mode) {
@@ -274,6 +333,12 @@ function searchModels(
       const bValue = b[sortConfig.field] ?? 0;
       return sortConfig.higherIsBetter ? bValue - aValue : aValue - bValue;
     });
+  } else {
+    // Default sort by knowledge cutoff date when no explicit sort provided
+    results.sort(
+      (a, b) =>
+        parseKnowledgeDate(b.knowledge) - parseKnowledgeDate(a.knowledge)
+    );
   }
 
   return results;
@@ -283,6 +348,17 @@ function searchModels(
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\u001B\[[0-9;]*[a-zA-Z]/g, "");
+}
+
+function parseKnowledgeDate(knowledge?: string): number {
+  if (!knowledge) return 0;
+  let str = knowledge.trim();
+  // Convert YYYYMMDD to ISO format for consistent parsing
+  if (/^\d{8}$/.test(str)) {
+    str = `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+  }
+  const ts = Date.parse(str);
+  return Number.isNaN(ts) ? 0 : ts;
 }
 
 function groupModels(models: ModelInfo[]): ModelInfo[] {
@@ -367,6 +443,14 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
   let output = "";
   let hiddenCount = 0;
 
+  // Default sort by knowledge cutoff date (latest first) if no --sort-by flag is provided
+  if (!args.sortBy) {
+    processedModels.sort(
+      (a, b) =>
+        parseKnowledgeDate(b.knowledge) - parseKnowledgeDate(a.knowledge)
+    );
+  }
+
   // Debug sorting
   if (args.verbose > 0 && args.sortBy) {
     console.log("\nDebug: Sorting values before sort:");
@@ -375,7 +459,7 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
     }
   }
 
-  // Apply sorting before any other processing
+  // Apply explicit sorting when --sort-by is provided (overrides default)
   if (args.sortBy) {
     const sortConfig = getSortConfig(args.sortBy);
     processedModels.sort((a, b) => {
@@ -383,13 +467,12 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
       const bValue = b[sortConfig.field] ?? 0;
       return sortConfig.higherIsBetter ? bValue - aValue : aValue - bValue;
     });
-  }
 
-  // Debug sorting
-  if (args.verbose > 0 && args.sortBy) {
-    console.log("\nDebug: Sorting values after sort:");
-    for (const model of processedModels) {
-      console.log(`${model.name}: ${args.sortBy}=${model[args.sortBy!]}`);
+    if (args.verbose > 0) {
+      console.log("\nDebug: Sorting values after sort:");
+      for (const model of processedModels) {
+        console.log(`${model.name}: ${args.sortBy}=${model[args.sortBy!]}`);
+      }
     }
   }
 
@@ -471,6 +554,16 @@ function compareModels(models: ModelInfo[], args: ParsedArgs): string {
       }
       default: {
         return generateTable(processedModels);
+      }
+    }
+
+    // Apply default cutoff-date sorting within each group when no --sort-by flag is provided
+    if (!args.sortBy) {
+      for (const key of Object.keys(groups)) {
+        groups[key].sort(
+          (a, b) =>
+            parseKnowledgeDate(b.knowledge) - parseKnowledgeDate(a.knowledge)
+        );
       }
     }
 
@@ -644,6 +737,10 @@ export default async function defaultMain(): Promise<void> {
     provider: args.provider,
     functionCalling: args.functionCalling,
     vision: args.vision,
+    reasoning: args.reasoning,
+    toolCall: args.toolCall,
+    inputModalities: args.inputModalities,
+    outputModalities: args.outputModalities,
     mode: args.mode,
     sortBy: args.sortBy,
   };
