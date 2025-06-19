@@ -47,6 +47,25 @@ npx aidex --model gpt --group-by provider --sort-by cache_read_cost_per_token
 | `--group-by <criteria>`                                          | `type`, `provider`, `mode`, `series` *(requires `--model` or `--provider` flag)*.               |
 | *All previous flags (`--model`, `--provider`, etc.) still work.* |                                                                                                  |
 
+
+### Sortable numeric fields
+
+The `--sort-by` flag accepts any **numeric** field returned by the API (after Aidex normalises the schema). The following fields are currently available:
+
+- `max_input_tokens` – Maximum context window size.
+- `max_output_tokens` – Maximum number of tokens the model can generate.
+- `input_cost_per_token` – Cost *per* input token.
+- `output_cost_per_token` – Cost *per* output token.
+- `cache_read_cost_per_token` – Cost *per* cached-read token.
+- `cache_write_cost_per_token` – Cost *per* cached-write token.
+
+Example:
+
+```bash
+# Show the cheapest GPT-style models first
+npx aidex --model gpt --sort-by input_cost_per_token
+```
+
 # ✨ **Emoji legend**: `📷` image, `🔊` audio, `🎥` video, `📝` text.
 
 ## Grouping Models
